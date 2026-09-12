@@ -1,0 +1,44 @@
+{
+  "pdfName": "광고.pdf",
+  "pageLen": 1,
+  "pages": [
+    {
+      "pageId": 1,
+      "width": 1275,
+      "height": 1650,
+      "paragraphs": [
+        {
+          "paragraphId": 10,
+          "type": "Title",
+          "section_level": 1,
+          "bbox": [[100, 100], [800, 100], [800, 180], [100, 180]],
+          "contents": "상품 안내",
+          "confidence": 0.99
+        },
+        {
+          "paragraphId": 11,
+          "type": "Text",
+          "bbox": [[100, 200], [1000, 200], [1000, 280], [100, 280]],
+          "contents": "최저 연 3.5%",
+          "confidence": 0.98
+        },
+        {
+          "paragraphId": 12,
+          "type": "Table",
+          "bbox": [[100, 300], [1100, 300], [1100, 700], [100, 700]],
+          "contents": "<table><tr><td>금리</td><td>3.5%</td></tr></table>",
+          "rows": 1,
+          "cols": 2,
+          "cells": []
+        },
+        {
+          "paragraphId": 13,
+          "type": "Figure",
+          "bbox": [[100, 750], [600, 750], [600, 1200], [100, 1200]],
+          "contents": "이미지 내부 문구"
+        }
+      ]
+    }
+  ]
+}
+

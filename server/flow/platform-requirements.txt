@@ -1,0 +1,6 @@
+# Supplied NH example environment snapshot; checked by setup-application.sh.
+# These are platform image requirements, not downloaded during closed-network setup.
+awx-dlp==4.0.0
+fastapi==0.139.2
+gunicorn==26.0.0
+uvicorn==0.51.0

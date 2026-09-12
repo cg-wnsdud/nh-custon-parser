@@ -1,0 +1,4 @@
+# The supplied NH platform image already provides FastAPI, Gunicorn and Uvicorn.
+# Only packages installed from the accompanying offline wheel directory belong here.
+python-multipart==0.0.17
+

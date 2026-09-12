@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.uv-cache/
+.uv-python/
+.wheel-smoke/
+tmp/
+server/flow/custom_libs/
+/docs/00-custom-parser-concepts-guide.md
