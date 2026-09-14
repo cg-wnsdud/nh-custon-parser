@@ -34,13 +34,6 @@ Knowledge Lake
 - `app_custom_parser/service/parsing_service.py`의 `parse()`는 실제 프로젝트 파싱 로직 진입점이다.
 - 현재 선택한 방식에서는 ETLwithLLM 3장의 `custom_extension`을 플랫폼 내부에 마운트하는 것이 아니라, **KL Custom Parser의 `parse()`에서 ETLwithLLM 공개 API를 호출**한다.
 
-## 문서 읽는 순서
-
-1. [Custom Parser 예제 코드 분석](docs/01-custom-parser-example.md)
-2. [ETLwithLLM API 분석](docs/02-etlwithllm-api.md)
-3. [통합 구조와 구현 기준](docs/03-integrated-architecture.md)
-4. [구현 및 검증 체크리스트](docs/04-implementation-checklist.md)
-
 ## 현재 확정된 개발 원칙
 
 - Python 3.11을 기준으로 작성한다.
@@ -89,8 +82,8 @@ server/flow/
 
 ```text
 POST /parsing
-  -> Base64 option 검증 및 원본 안전 저장
-  -> option은 디스크에 저장하지 않고 subprocess 표준입력으로 전달
+  -> Base64 option 검증 및 원본 저장
+  -> 원본 예제의 subprocess 진입 방식으로 parse(work_dir, img_dir, file_path, option) 호출
   -> UUID별 subprocess에서 parse() 실행
   -> ETL 1.16 분석 요청
   -> 1.17 상태 폴링
@@ -154,6 +147,20 @@ POST /parsing
 현재 기본 exporter는 잘못된 의미가 적재되지 않도록 `cust_meta`와 `doc_data.json`을 만들지
 않고, Figure OCR 문구만 `text`로 보존한다.
 
+향후 광고 후처리 단계에서는 파서가 판정한 광고 상품 유형, 적용한 광고 템플릿 등
+VectorDB 문서 메타데이터로 실제 반영할 값이 확정되면 `doc_data.json` 생성 대상으로
+검토한다. 입력 `doc_data`를 그대로 복사하는 것이 아니라, KL이 요구하는 변경 파일의
+전체/부분 갱신 규칙을 먼저 확인한 뒤 파서가 계산한 변경값만 출력한다.
+
+### 플랫폼 골격 변경 원칙
+
+현재 선택은 농협 요구의 보수적인 해석이다. `run-application.sh`, `gunicorn_config.py`,
+`main.py`의 실행 흐름과 외부 API 계약은 원본 예제를 기준으로 유지하고, 프로젝트 업무
+로직은 `parsing_service.py`의 `parse(work_dir, img_dir, file_path, option)` 이하에 둔다.
+예제의 `options = {}` 미구현, Base64 option 미처리, 문자열 timeout 연산, 문법 오류,
+무조건 생성되는 빈 이미지 ZIP처럼 실제 실행이나 문서 계약과 충돌하는 부분만 최소한으로
+보정한다.
+
 ### 로컬 검증
 
 코어 모듈은 외부 패키지 없이 테스트할 수 있다.
@@ -170,7 +177,11 @@ Gunicorn, Uvicorn이 필요하다. 예제 환경에서 확인한 버전은 `plat
 
 ## 배포 직전에 반드시 재확인할 한 가지
 
-미팅에서 전달된 “모든 파일을 한 폴더에 둔다”는 설명과 기존 샘플의 계층 구조는 서로 다르다. 기존 `run-application.sh`는 `app_custom_parser` 디렉터리로 이동하고 `main:app`을 실행한다. 따라서 실제 등록본을 평면 구조로 만들기 전에 다음 중 어느 의미인지 농협 측 템플릿으로 확정해야 한다.
+미팅 복기상 “한 폴더”는 업로드하는 Python 소스와 wheel의 평면화를 뜻하는 것으로
+이해하고 있다. 다만 기존 샘플은 계층 구조이고 `run-application.sh`는
+`app_custom_parser` 디렉터리로 이동하여 `main:app`을 실행하므로 아직 확정 규칙으로
+적용하지 않는다. 실제 등록본을 평면 구조로 만들기 전에 다음 중 어느 의미인지 농협 측
+최신 템플릿으로 확정해야 한다.
 
 - 업로드할 최상위 번들 하나만 허용한다는 의미
 - `app_custom_parser` 안에서 하위 `service/` 폴더를 만들지 말라는 의미

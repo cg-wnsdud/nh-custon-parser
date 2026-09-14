@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import contextlib
 import io
 import json
@@ -9,8 +8,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -228,15 +226,12 @@ class ParsingServiceTests(unittest.TestCase):
 
 
 class MainHelpersTests(unittest.TestCase):
-    def test_option_decoding(self):
+    def test_timeout_is_an_integer_for_the_sample_response_contract(self):
         try:
             import main
         except ModuleNotFoundError as exc:
             self.skipTest(f"platform web dependencies are unavailable: {exc}")
-        encoded = base64.b64encode('{"etl":{"ws_id":"ws"}}'.encode()).decode()
-        self.assertEqual(main._decode_option(encoded)["etl"]["ws_id"], "ws")
-        with self.assertRaises(ValueError):
-            main._decode_option("not-base64")
+        self.assertIsInstance(main.TIMEOUT, int)
 
 
 class ApiContractTests(unittest.TestCase):
@@ -292,17 +287,20 @@ class ApiContractTests(unittest.TestCase):
             finally:
                 self.main.PATH_WORK = old_root
 
-    def test_subprocess_receives_option_only_through_stdin(self):
+    def test_subprocess_uses_original_parse_entrypoint_and_passes_option(self):
         options = {"etl": {"base_url": "http://internal", "ws_id": "workspace"}}
-        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
-        with patch.object(self.main.subprocess, "run", return_value=completed) as mocked:
+        process = Mock()
+        process.communicate.return_value = (b"", b"")
+        process.returncode = 0
+        with patch.object(self.main.subprocess, "Popen", return_value=process) as mocked:
             self.main.run_method_in_subprocess(
                 600, "work", "image", "document.pdf", options
             )
         command = mocked.call_args.args[0]
-        self.assertIn("--option-stdin", command)
-        self.assertNotIn("http://internal", command)
-        self.assertEqual(json.loads(mocked.call_args.kwargs["input"]), options)
+        self.assertEqual(command[1], "-c")
+        self.assertIn("from service.parsing_service import parse", command[2])
+        self.assertIn(repr(options), command[2])
+        process.communicate.assert_called_once_with(timeout=610)
 
     def test_health(self):
         with self.TestClient(self.main.app) as client:
@@ -334,6 +332,7 @@ class ApiContractTests(unittest.TestCase):
                     self.assertEqual(response.json()["status"], "ERROR")
 
                     directory.mkdir()
+                    (directory / "image").mkdir()
                     source = directory / "광고.pdf"
                     source.write_bytes(b"pdf")
                     export_hrc(convert_default_json(fixture_payload()), source, directory)

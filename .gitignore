@@ -5,4 +5,4 @@ __pycache__/
 .wheel-smoke/
 tmp/
 server/flow/custom_libs/
-/docs/00-custom-parser-concepts-guide.md
+/docs/

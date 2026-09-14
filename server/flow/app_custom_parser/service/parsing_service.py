@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import argparse
 import json
-import sys
+import os
+import shutil
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -13,24 +13,28 @@ from .etl_adapter import convert_default_json
 from .etl_client import EtlClient
 from .hrc_exporter import export_hrc
 from .result_contract import collect_result_files
-from .status import read_parse_status as _read_parse_status
-from .status import write_parse_status as _write_parse_status
-
-
 ClientFactory = Callable[[EtlConfig], EtlClient]
 
 
-# Preserve the names and signatures marked DO NOT EDIT in the supplied example.
+# Preserve the implementations marked DO NOT EDIT in the supplied example.
 def write_parse_status(work_dir: str, work_status: str, msg: str = "") -> None:
-    _write_parse_status(work_dir, work_status, msg)
+    status_file = os.path.join(work_dir, "genaikl.status")
+    temp_file = status_file + ".tmp"
+    with open(temp_file, "w+", encoding="utf-8") as status_fd:
+        status = {"status": work_status, "message": msg}
+        json.dump(status, status_fd, ensure_ascii=False)
+    shutil.move(temp_file, status_file, copy_function=shutil.copy)
 
 
 def get_parse_status(work_dir: str) -> tuple[str, str]:
-    try:
-        status = _read_parse_status(work_dir)
+    status_file = os.path.join(work_dir, "genaikl.status")
+    if os.path.exists(status_file):
+        with open(status_file, "r", encoding="utf-8") as status_fd:
+            status = json.load(status_fd)
         return status["status"], status["message"]
-    except FileNotFoundError:
-        return "UNKNOWN", "Requested url does not exist."
+    if os.path.exists(work_dir) and os.path.exists(status_file + ".tmp"):
+        return "PARSING", ""
+    return "UNKNOWN", "Requested url does not exist."
 
 
 def process_document(
@@ -62,19 +66,3 @@ def parse(work_dir: str, img_dir: str, file_path: str, option: Any = None) -> No
         write_parse_status(work_dir, "DONE")
     except Exception as exc:
         write_parse_status(work_dir, "ERROR", str(exc))
-
-
-def _main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--work-dir", required=True)
-    parser.add_argument("--img-dir", required=True)
-    parser.add_argument("--file-path", required=True)
-    parser.add_argument("--option-stdin", action="store_true", required=True)
-    args = parser.parse_args()
-    option = json.loads(sys.stdin.read())
-    parse(args.work_dir, args.img_dir, args.file_path, option)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(_main())
