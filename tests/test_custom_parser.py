@@ -187,6 +187,22 @@ class EtlClientTests(unittest.TestCase):
         self.assertEqual(transport.file_field, "upfiles")
         self.assertEqual(transport.posted_tr_data["res_type"], ["default"])
         self.assertEqual(transport.posted_tr_data["prj_config"]["extract_type"], "dla")
+        self.assertEqual(
+            transport.get_calls[:3],
+            [
+                ("/api/v1/file/info", {"file_path": "광고.pdf/v1/광고.pdf"}),
+                ("/api/v1/file/info", {"file_path": "광고.pdf/v1/광고.pdf"}),
+                ("/api/v1/file/info", {"file_path": "광고.pdf/v1/광고.pdf"}),
+            ],
+        )
+        self.assertEqual(
+            transport.get_calls[3],
+            ("/api/v1/file/result/list", {"docPath": "광고.pdf/v1/광고.pdf"}),
+        )
+        self.assertEqual(
+            transport.get_calls[4],
+            ("/api/v1/file/result/doc", {"docResultPath": "result/광고.json"}),
+        )
 
     def test_ambiguous_default_result_is_rejected(self):
         with self.assertRaises(EtlApiError):
@@ -318,7 +334,7 @@ class ApiContractTests(unittest.TestCase):
                 directory.mkdir()
                 source = directory / "광고.pdf"
                 source.write_bytes(b"pdf")
-                from service.status import write_parse_status
+                from service.parsing_service import write_parse_status
 
                 with self.TestClient(self.main.app) as client:
                     write_parse_status(directory, "PARSING")
