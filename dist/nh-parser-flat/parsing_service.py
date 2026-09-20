@@ -69,7 +69,7 @@ def process_document(
 ) -> None:
     del img_dir  # v1 preserves Figure OCR text; it does not emit image references.
     options = dict(option or {})
-    config = EtlConfig.from_sources(options)
+    config = EtlConfig.from_environment()
     default_json = client_factory(config).analyze(file_path)
     document = convert_default_json(default_json)
     doc_data = options.get("doc_data")

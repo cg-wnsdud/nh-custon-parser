@@ -61,6 +61,8 @@ server/flow/                        # 템플릿 원본 미러 (수정 금지)
       └─ README.md                  # 농협 전달용 한글 안내
 tools/                              # 우리 개발용 도구 (전달 대상 아님)
 docs/                               # 분석·설계 문서
+dependencies/                       # requests 고정 명세와 Python 3.11 범용 wheel 원본
+dist/nh-parser-flat/                # 농협 전달용 평면 생성본
 ```
 
 `server/flow`의 템플릿 파일은 원본과 diff가 없어야 한다. 원본 경로는
@@ -77,7 +79,7 @@ docs/                               # 분석·설계 문서
 
 ```bash
 python tools/build_delivery_bundle.py
-# dist/nh-parser-flat/      : 평면 파일 8개
+# dist/nh-parser-flat/      : 구현·안내·requirements·wheel 평면 전달본
 # dist/nh-parser-flat.zip   : 전달용 압축본
 ```
 
@@ -86,6 +88,7 @@ python tools/build_delivery_bundle.py
 - `main.py`, `gunicorn_config.py`가 섞여 들어가면 빌드 실패
 - `service/` 안에 하위 폴더가 생기면 빌드 실패
 - 상대 import(`from .module import ...`)가 남아 있으면 빌드 실패
+- `requirements.txt`와 고정된 하위 의존성 wheel이 빠지거나 추가되면 빌드 실패
 - 모든 모듈이 컴파일되는지 확인
 
 ## ETL 설정 주입
@@ -107,9 +110,23 @@ python tools/build_delivery_bundle.py
 필수 값이 없으면 ETL을 호출하지 않고 다음 메시지로 실패한다.
 `Missing ETL configuration: base_url/ETL_BASE_URL, author/ETL_AUTHOR, ws_id/ETL_WS_ID`
 
-`EtlConfig.from_sources()`는 `option.etl`과 `parser_info.prop`도 계속 읽는다. 현재 경로에서는
-값이 오지 않지만, `main.py` 패치가 허용되거나 다른 호출 경로가 생기면 그대로 쓸 수 있다.
-우선순위는 `option` > 환경변수다.
+현재 `EtlConfig.from_environment()`는 환경변수만 읽는다. KL의 `option`을 사용하려면 원본
+`main.py`가 해당 값을 디코딩해 `parse()`로 전달하도록 허용된 뒤 별도로 구현한다.
+
+### `option`이란
+
+`option`은 KL이 `POST /parsing`에서 원본 파일과 함께 보낼 수 있는 선택 설정값이다. 예제상
+Base64로 인코딩한 JSON 문자열이며 문서 메타데이터나 파서별 옵션을 담을 수 있다. 그러나
+현재 템플릿 `main.py`는 이를 디코딩하지 않고 `options = {}`를 전달하므로 우리 코드에서는
+사용하지 않는다. 향후 농협이 템플릿 수정 또는 `option` 전달을 허용하면 그때 입력 스키마를
+확정해 다시 구현한다.
+
+## Python 의존성
+
+ETL HTTP 호출은 `requests==2.34.2`를 사용한다. 농협 폐쇄망 설치를 위해 `requests`와
+하위 의존성(`certifi`, `charset-normalizer`, `idna`, `urllib3`)을 모두 버전 고정하고
+범용 Python wheel로 전달본에 포함한다. 설치 목록의 원본은 `dependencies/requirements.txt`,
+wheel 원본은 `dependencies/wheels/`이며 빌더가 이를 전달 폴더 최상위로 복사한다.
 
 ## 템플릿 원본을 고치지 않고 남겨 둔 이슈
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -20,7 +21,7 @@ sys.path.insert(0, str(SERVICE_DIR))
 
 from etl_config import EtlConfig  # noqa: E402
 from etl_adapter import EtlSchemaError, convert_default_json  # noqa: E402
-from etl_client import EtlApiError, EtlClient  # noqa: E402
+from etl_client import EtlApiError, EtlClient, RequestsTransport  # noqa: E402
 from hrc_exporter import export_hrc  # noqa: E402
 from parsing_service import process_document  # noqa: E402
 from result_contract import build_result_zip, collect_result_files  # noqa: E402
@@ -71,44 +72,31 @@ class FakeTransport:
 
 
 class ConfigTests(unittest.TestCase):
-    def test_option_overrides_environment_and_defaults_to_dla(self):
-        config = EtlConfig.from_sources(
-            {"etl": {"base_url": "http://etl.local/", "author": "svc", "ws_id": "ws"}},
-            {"ETL_BASE_URL": "http://ignored", "ETL_AUTHOR": "ignored", "ETL_WS_ID": "ignored"},
+    def test_environment_values_and_defaults(self):
+        config = EtlConfig.from_environment(
+            {
+                "ETL_BASE_URL": "http://etl.local/",
+                "ETL_AUTHOR": "svc",
+                "ETL_WS_ID": "ws",
+            }
         )
         self.assertEqual(config.base_url, "http://etl.local")
         self.assertEqual(config.project_config["extract_type"], "dla")
         self.assertEqual(config.project_config["table_to_struct"], "html")
 
-    def test_original_parser_info_prop_url_is_supported(self):
-        config = EtlConfig.from_sources(
-            {
-                "parser_info": {
-                    "prop": {
-                        "supplier": "agilesoda",
-                        "url": "http://etl.from-kl",
-                        "key": "not-used-without-an-etl-header-contract",
-                        "author": "svc",
-                        "ws_id": "ws",
-                    }
-                }
-            },
-            {},
-        )
-        self.assertEqual(config.base_url, "http://etl.from-kl")
+    def test_missing_environment_values_are_reported(self):
+        with self.assertRaisesRegex(ValueError, "ETL_AUTHOR, ETL_WS_ID"):
+            EtlConfig.from_environment({"ETL_BASE_URL": "http://etl"})
 
     def test_rejects_customize_extract_type(self):
         with self.assertRaises(ValueError):
-            EtlConfig.from_sources(
+            EtlConfig.from_environment(
                 {
-                    "etl": {
-                        "base_url": "http://etl",
-                        "author": "svc",
-                        "ws_id": "ws",
-                        "prj_config": {"extract_type": "customize"},
-                    }
-                },
-                {},
+                    "ETL_BASE_URL": "http://etl",
+                    "ETL_AUTHOR": "svc",
+                    "ETL_WS_ID": "ws",
+                    "ETL_PRJ_CONFIG": '{"extract_type":"customize"}',
+                }
             )
 
 
@@ -164,6 +152,34 @@ class AdapterAndExporterTests(unittest.TestCase):
 
 
 class EtlClientTests(unittest.TestCase):
+    def test_requests_transport_builds_get_and_multipart_requests(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"result": {"code": 0}}
+        response.text = ""
+        session = Mock()
+        session.get.return_value = response
+        session.post.return_value = response
+        transport = RequestsTransport("http://etl.local/base/", 30, session=session)
+
+        transport.get_json("/status", {"file_path": "문서.pdf"})
+        session.get.assert_called_once_with(
+            "http://etl.local/base/status",
+            params={"file_path": "문서.pdf"},
+            headers={"Accept": "application/json"},
+            timeout=(30, 30),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "문서.pdf"
+            source.write_bytes(b"pdf")
+            transport.post_multipart_json(
+                "/start", {"tr_data": "{}"}, "upfiles", source
+            )
+        call = session.post.call_args
+        self.assertEqual(call.args[0], "http://etl.local/base/start")
+        self.assertEqual(call.kwargs["data"], {"tr_data": "{}"})
+        self.assertIn("upfiles", call.kwargs["files"])
+
     def test_complete_analysis_flow_uses_section_116_contract(self):
         transport = FakeTransport()
         clock_values = iter([0.0, 0.0, 0.1, 0.2, 0.3])
@@ -233,13 +249,22 @@ class ParsingServiceTests(unittest.TestCase):
             source.write_bytes(b"pdf")
             image_dir = directory / "image"
             image_dir.mkdir()
-            process_document(
-                str(directory),
-                str(image_dir),
-                str(source),
-                {"etl": {"base_url": "http://etl", "author": "svc", "ws_id": "ws"}},
-                client_factory=FakeClient,
-            )
+            with patch.dict(
+                os.environ,
+                {
+                    "ETL_BASE_URL": "http://etl",
+                    "ETL_AUTHOR": "svc",
+                    "ETL_WS_ID": "ws",
+                },
+                clear=False,
+            ):
+                process_document(
+                    str(directory),
+                    str(image_dir),
+                    str(source),
+                    None,
+                    client_factory=FakeClient,
+                )
             self.assertTrue((directory / "광고.pdf_hrc.jsonl").is_file())
             self.assertTrue((directory / "광고.pdf_hrc.json").is_file())
 

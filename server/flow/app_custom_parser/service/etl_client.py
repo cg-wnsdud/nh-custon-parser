@@ -1,17 +1,17 @@
-"""ETLwithLLM 1.16+ analysis API client using only the Python standard library."""
+"""ETLwithLLM 1.16+ analysis API client."""
 
 from __future__ import annotations
 
-import http.client
 import json
 import mimetypes
 import os
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import urlsplit
+
+import requests
 
 from etl_config import EtlConfig
 
@@ -38,52 +38,47 @@ class JsonTransport(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class StandardLibraryTransport:
-    """Small streaming HTTP transport; authentication is outside this project scope."""
+class RequestsTransport:
+    """HTTP transport backed by requests; authentication is not yet defined."""
 
-    def __init__(self, base_url: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float,
+        session: requests.Session | None = None,
+    ) -> None:
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("ETL base_url must be an absolute http(s) URL")
         if parsed.query or parsed.fragment:
             raise ValueError("ETL base_url must not contain a query or fragment")
-        self._scheme = parsed.scheme
-        self._host = parsed.hostname
-        self._port = parsed.port
-        self._prefix = parsed.path.rstrip("/")
-        self._timeout = timeout_seconds
+        self._base_url = base_url.rstrip("/")
+        self._timeout = (timeout_seconds, timeout_seconds)
+        self._session = session or requests.Session()
 
-    def _connection(self) -> http.client.HTTPConnection:
-        connection_type = (
-            http.client.HTTPSConnection
-            if self._scheme == "https"
-            else http.client.HTTPConnection
-        )
-        return connection_type(self._host, self._port, timeout=self._timeout)
-
-    def _read_json(self, response: http.client.HTTPResponse) -> dict[str, Any]:
-        body = response.read()
-        if not 200 <= response.status < 300:
-            excerpt = body[:500].decode("utf-8", errors="replace")
-            raise EtlApiError(f"ETL HTTP {response.status}: {excerpt}")
+    @staticmethod
+    def _read_json(response: requests.Response) -> dict[str, Any]:
+        if not 200 <= response.status_code < 300:
+            raise EtlApiError(f"ETL HTTP {response.status_code}: {response.text[:500]}")
         try:
-            payload = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise EtlApiError("ETL response is not valid UTF-8 JSON") from exc
+            payload = response.json()
+        except ValueError as exc:
+            raise EtlApiError("ETL response is not valid JSON") from exc
         if not isinstance(payload, dict):
             raise EtlApiError("ETL response JSON must be an object")
         return payload
 
     def get_json(self, path: str, query: Mapping[str, str]) -> dict[str, Any]:
-        target = f"{self._prefix}{path}?{urlencode(query)}"
-        connection = self._connection()
         try:
-            connection.request("GET", target, headers={"Accept": "application/json"})
-            return self._read_json(connection.getresponse())
-        except (OSError, http.client.HTTPException) as exc:
+            response = self._session.get(
+                f"{self._base_url}{path}",
+                params=dict(query),
+                headers={"Accept": "application/json"},
+                timeout=self._timeout,
+            )
+            return self._read_json(response)
+        except requests.RequestException as exc:
             raise EtlApiError(f"ETL GET failed: {exc}") from exc
-        finally:
-            connection.close()
 
     def post_multipart_json(
         self,
@@ -92,48 +87,20 @@ class StandardLibraryTransport:
         file_field: str,
         file_path: Path,
     ) -> dict[str, Any]:
-        boundary = f"----nh-custom-parser-{uuid.uuid4().hex}"
-        chunks: list[bytes] = []
-        for name, value in fields.items():
-            chunks.append(
-                (
-                    f"--{boundary}\r\n"
-                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-                    f"{value}\r\n"
-                ).encode("utf-8")
-            )
         safe_filename = file_path.name.replace('"', "_").replace("\r", "_").replace("\n", "_")
         content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
-        chunks.append(
-            (
-                f"--{boundary}\r\n"
-                f'Content-Disposition: form-data; name="{file_field}"; '
-                f'filename="{safe_filename}"; filename*=UTF-8\'\'{quote(file_path.name)}\r\n'
-                f"Content-Type: {content_type}\r\n\r\n"
-            ).encode("utf-8")
-        )
-        prefix = b"".join(chunks)
-        suffix = f"\r\n--{boundary}--\r\n".encode("ascii")
-        content_length = len(prefix) + file_path.stat().st_size + len(suffix)
-        target = f"{self._prefix}{path}"
-
-        connection = self._connection()
         try:
-            connection.putrequest("POST", target)
-            connection.putheader("Accept", "application/json")
-            connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
-            connection.putheader("Content-Length", str(content_length))
-            connection.endheaders()
-            connection.send(prefix)
             with file_path.open("rb") as stream:
-                while block := stream.read(1024 * 1024):
-                    connection.send(block)
-            connection.send(suffix)
-            return self._read_json(connection.getresponse())
-        except (OSError, http.client.HTTPException) as exc:
+                response = self._session.post(
+                    f"{self._base_url}{path}",
+                    data=dict(fields),
+                    files={file_field: (safe_filename, stream, content_type)},
+                    headers={"Accept": "application/json"},
+                    timeout=self._timeout,
+                )
+            return self._read_json(response)
+        except requests.RequestException as exc:
             raise EtlApiError(f"ETL POST failed: {exc}") from exc
-        finally:
-            connection.close()
 
 
 def _api_code(payload: Mapping[str, Any], operation: str) -> None:
@@ -161,7 +128,7 @@ class EtlClient:
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.config = config
-        self.transport = transport or StandardLibraryTransport(
+        self.transport = transport or RequestsTransport(
             config.base_url, config.connect_timeout_seconds
         )
         self._sleep = sleep
