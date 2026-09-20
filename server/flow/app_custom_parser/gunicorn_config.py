@@ -7,7 +7,7 @@ pwd = os.getcwd()
 proc_name = os.getenv("FLOW_APP_NAME", "app_flow")
 MLDL_PROBE_PORT = os.getenv("MLDL_PROBE_PORT", "9101")
 
-# ==============================================================================
+# ==============================================================================    
 # Gunicorn Settings: https://docs.gunicorn.org/en/stable/settings.html#settings
 #
 #     worker_class: The type of workers to use
@@ -37,3 +37,4 @@ bind = "0.0.0.0:" + MLDL_PROBE_PORT
 if dlp.is_infer_env():
     workers = os.getenv("MLDL_INFER_WORKER_COUNT", "8")
     log_level = os.getenv("MLDL_LOG_LEVEL", "info")
+

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import quote, urlencode, urlsplit
 
-from .config import EtlConfig
+from etl_config import EtlConfig
 
 
 class EtlApiError(RuntimeError):

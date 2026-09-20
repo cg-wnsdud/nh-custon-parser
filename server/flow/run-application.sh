@@ -37,7 +37,7 @@ sudo sed -i "s/POD_HASH/${POD_HASH}/g" "$GUNICORN_LOG_CONF"
 
 
 if [ -z "$FLOW_APP_DIR" ]; then
-    echo "APP_DIR NOT EXISTS: $FLOW_APP_DIR, INSTEAD OF PATH_SOURCE: $PATH_SOURCE"
+    echo "APP_DIR NOT EXISTS: $FLOW_APP_DIR, INSTEAD OF PATH_SOURCE: $PATH_SOURCE" 
     cd $PATH_SOURCE/$FLOW_APP_NAME
 else
     echo "APP_DIR EXISTS: $FLOW_APP_DIR"
@@ -50,7 +50,7 @@ echo "CHECK YOUR LOG AT FOLLOWING PATH: $PATH_LOG"
 echo "CHECK YOUR LOG AT FOLLOWING PATH: $PATH_LOG"
 
 # ===================================================
-# CUSTOM 영역
+# CUSTOM 영역 
 # ===================================================
 
 if [ -z "$FLOW_APP_DIR" ]; then
@@ -62,3 +62,4 @@ fi
 export PYTHONPATH=$PYTHONPATH:$CUSTOM_LIBS
 
 gunicorn main:app --config gunicorn_config.py
+

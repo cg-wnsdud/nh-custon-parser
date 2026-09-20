@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .document_model import NormalizedDocument, Region
+from document_model import NormalizedDocument, Region
 
 
 ALLOWED_ITEMS = frozenset({"text", "table", "image", "h1", "h2", "h3", "h4"})

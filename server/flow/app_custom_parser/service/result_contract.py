@@ -7,7 +7,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from .hrc_exporter import validate_hrc_items
+from hrc_exporter import validate_hrc_items
 
 
 def collect_result_files(work_dir: str | Path) -> list[Path]:

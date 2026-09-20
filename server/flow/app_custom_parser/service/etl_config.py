@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -38,6 +39,21 @@ def _nonempty(value: Any) -> str | None:
         return None
     rendered = str(value).strip()
     return rendered or None
+
+
+def _json_object(value: Any, name: str) -> Mapping[str, Any]:
+    """Read a JSON object from an environment variable such as ETL_PRJ_CONFIG."""
+    if value is None or str(value).strip() == "":
+        return {}
+    if isinstance(value, Mapping):
+        return value
+    try:
+        parsed = json.loads(str(value))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{name} must be a JSON object") from exc
+    if not isinstance(parsed, Mapping):
+        raise ValueError(f"{name} must be a JSON object")
+    return parsed
 
 
 def _number(value: Any, default: float, name: str, minimum: float) -> float:
@@ -109,6 +125,7 @@ class EtlConfig:
             raise ValueError("Missing ETL configuration: " + ", ".join(missing))
 
         raw_project_config: dict[str, Any] = {}
+        raw_project_config.update(_json_object(env.get("ETL_PRJ_CONFIG"), "ETL_PRJ_CONFIG"))
         raw_project_config.update(_mapping(parser_properties.get("prj_config")))
         raw_project_config.update(_mapping(explicit.get("prj_config")))
         unknown = sorted(set(raw_project_config) - ALLOWED_PROJECT_OPTIONS)

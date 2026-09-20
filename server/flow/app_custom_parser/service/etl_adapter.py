@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .document_model import NormalizedDocument, Page, Region
+from document_model import NormalizedDocument, Page, Region
 
 
 KNOWN_PARAGRAPH_FIELDS = frozenset(

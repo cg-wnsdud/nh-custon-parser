@@ -35,14 +35,27 @@ def get_parse_status(work_dir: str):
     return ret
 
 
+# ==============================================================
+# 프로젝트 구현 영역 (커스텀 파서 로직)
+#
+# 이 파일과 같은 폴더에 있는 모듈들을 사용한다(flat 구성, 하위 폴더 없음).
+# main.py가 `from service.parsing_service import ...` 로 이 파일을 불러도
+# 형제 모듈을 찾을 수 있도록 현재 폴더를 import 경로에 추가한다.
+# ==============================================================
+import sys
+
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _MODULE_DIR not in sys.path:
+    sys.path.insert(0, _MODULE_DIR)
+
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .config import EtlConfig
-from .etl_adapter import convert_default_json
-from .etl_client import EtlClient
-from .hrc_exporter import export_hrc
-from .result_contract import collect_result_files
+from etl_config import EtlConfig
+from etl_adapter import convert_default_json
+from etl_client import EtlClient
+from hrc_exporter import export_hrc
+from result_contract import collect_result_files
 
 ClientFactory = Callable[[EtlConfig], EtlClient]
 

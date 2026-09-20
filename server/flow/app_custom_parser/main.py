@@ -1,6 +1,4 @@
 import os
-import base64
-import json
 import io
 import shutil
 import zipfile
@@ -12,14 +10,13 @@ import traceback
 from fastapi import FastAPI
 from fastapi import UploadFile
 from fastapi import BackgroundTasks
-from fastapi import Form
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.encoders import jsonable_encoder
 
 from service.parsing_service import get_parse_status, write_parse_status
 
 
-TIMEOUT = int(os.getenv("TIMEOUT", "600"))
+TIMEOUT = os.getenv("TIMEOUT", 600)
 PATH_WORK = os.getenv("PATH_TEMP", "./temp")
 
 app = FastAPI()
@@ -31,8 +28,7 @@ app = FastAPI()
           deprecated=False)
 async def parsing_text_docx_to_json(src_file: UploadFile,
                                     background_tasks: BackgroundTasks,
-                                    option: str = Form(None)):
-    work_dir = ""
+                                    option: str = None):
     try:
 
         # ==============================================================
@@ -40,7 +36,7 @@ async def parsing_text_docx_to_json(src_file: UploadFile,
         # ==============================================================
         # option_dec = base64.decodebytes(option)
         # options = json.loads(option_dec.decode("utf-8"))
-        # doc_data = options.get("doc_data", {})
+        # doc_data = options.get("doc_data", {}) 
         #
         # {
         #     "doc_id": "doc_id",
@@ -66,13 +62,8 @@ async def parsing_text_docx_to_json(src_file: UploadFile,
         # }
 
         options = {}
-        if option:
-            option_dec = base64.decodebytes(bytes(option, "utf-8"))
-            options = json.loads(option_dec.decode("utf-8"))
-            if not isinstance(options, dict):
-                raise ValueError("decoded option must be a JSON object")
         # ==============================================================
-        # 입력값 처리
+        # 입력값 처리 
         # ==============================================================
         # 파일명
         base_filename = src_file.filename
@@ -93,7 +84,7 @@ async def parsing_text_docx_to_json(src_file: UploadFile,
         write_parse_status(work_dir, "PARSING") # 파서 상태 설정
 
         # ==============================================================
-        # 백그라운드에서 파싱처리
+        # 백그라운드에서 파싱처리 
         # ==============================================================
         background_tasks.add_task(run_method_in_subprocess, TIMEOUT, work_dir, img_dir, file_fullpath, options)
 
@@ -164,21 +155,18 @@ async def parsing_text_docx_to_json(uuid):
 
                 # image 디렉터리 검색하여 파일이 있으면 압축한다.
                 # 모든 zip 파일은 경로 없이 파일들만 압축한다.
-                items = [
-                    item for item in os.listdir(img_dir)
-                    if os.path.isfile(os.path.join(img_dir, item))
-                ]
+                items = os.listdir(img_dir)
 
-                # 원본 README는 이미지가 있을 때만 _img.zip을 만들도록 정의한다.
-                if items:
-                    with zipfile.ZipFile(img_zip_file, mode='w', compression=zipfile.ZIP_DEFLATED) as img_zip:
-                        for item in items:
+                with zipfile.ZipFile(img_zip_file, mode='w', compression=zipfile.ZIP_DEFLATED) as img_zip:
+                    for item in items:
+                        if os.path.isfile(os.path.join(img_dir, item)):
                             img_file = os.path.join(img_dir, item)
 
                             fname = os.path.split(img_file)[1]
                             zip_path = os.path.join(zip_subdir, fname)
                             img_zip.write(img_file, zip_path)
 
+                if os.path.exists(img_zip_file):
                     zip_with_filenames.append(img_zip_file) # ZIP 압축 파일 리스트에 추가
 
                 # 결과 ZIP 파일을 압축한다.
@@ -203,13 +191,6 @@ async def parsing_text_docx_to_json(uuid):
             elif _parse_status == "PARSING":  # 파싱 진행 중 상태
                 status_code = 200
                 result_form = {"status": "PARSING"}
-            elif _parse_status == "ERROR":
-                # parser_howto.txt는 파싱 오류를 HTTP 200 + ERROR로 정의한다.
-                status_code = 200
-                result_form = {"status": "ERROR", "message": _parse_msg}
-                if os.path.exists(work_dir):
-                    print(f"Work directory {work_dir} deleted because parsing status is {_parse_msg}")
-                    shutil.rmtree(work_dir, ignore_errors=True)
             else:
                 status_code = 500
                 result_form = {"message": _parse_msg}

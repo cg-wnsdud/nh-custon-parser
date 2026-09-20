@@ -13,14 +13,17 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_DIR = ROOT / "server" / "flow" / "app_custom_parser"
+SERVICE_DIR = APP_DIR / "service"
+# 전달본과 같은 flat 배치로 임포트한다.
 sys.path.insert(0, str(APP_DIR))
+sys.path.insert(0, str(SERVICE_DIR))
 
-from service.config import EtlConfig  # noqa: E402
-from service.etl_adapter import EtlSchemaError, convert_default_json  # noqa: E402
-from service.etl_client import EtlApiError, EtlClient  # noqa: E402
-from service.hrc_exporter import export_hrc  # noqa: E402
-from service.parsing_service import process_document  # noqa: E402
-from service.result_contract import build_result_zip, collect_result_files  # noqa: E402
+from etl_config import EtlConfig  # noqa: E402
+from etl_adapter import EtlSchemaError, convert_default_json  # noqa: E402
+from etl_client import EtlApiError, EtlClient  # noqa: E402
+from hrc_exporter import export_hrc  # noqa: E402
+from parsing_service import process_document  # noqa: E402
+from result_contract import build_result_zip, collect_result_files  # noqa: E402
 
 
 FIXTURE = ROOT / "tests" / "fixtures" / "default_result.json"
@@ -241,15 +244,6 @@ class ParsingServiceTests(unittest.TestCase):
             self.assertTrue((directory / "광고.pdf_hrc.json").is_file())
 
 
-class MainHelpersTests(unittest.TestCase):
-    def test_timeout_is_an_integer_for_the_sample_response_contract(self):
-        try:
-            import main
-        except ModuleNotFoundError as exc:
-            self.skipTest(f"platform web dependencies are unavailable: {exc}")
-        self.assertIsInstance(main.TIMEOUT, int)
-
-
 class ApiContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -266,7 +260,7 @@ class ApiContractTests(unittest.TestCase):
             old_root = self.main.PATH_WORK
             self.main.PATH_WORK = Path(temporary)
             try:
-                with patch.object(self.main, "run_method_in_subprocess", return_value=None):
+                with patch.object(self.main, "run_method_in_subprocess", return_value=None) as mocked:
                     with self.TestClient(self.main.app) as client:
                         response = client.post(
                             "/parsing",
@@ -277,26 +271,30 @@ class ApiContractTests(unittest.TestCase):
                 payload = response.json()
                 self.assertEqual(payload["result"], "OK")
                 self.assertEqual(len(payload["body"]["uuid"]), 32)
-                self.assertIsInstance(payload["body"]["timeout"], int)
+                self.assertEqual(payload["body"]["timeout"], self.main.TIMEOUT)
                 job_dir = Path(temporary) / payload["body"]["uuid"]
                 self.assertTrue((job_dir / "광고.pdf").is_file())
-                self.assertFalse((job_dir / "option.json").exists())
+                # 템플릿 원본 main.py는 option을 parse()로 전달하지 않는다.
+                # ETL 접속 정보를 환경변수로 받는 이유가 이것이다.
+                self.assertEqual(mocked.call_args.args[4], {})
             finally:
                 self.main.PATH_WORK = old_root
 
-    def test_invalid_option_and_unknown_uuid_follow_source_error_status(self):
+    def test_template_ignores_option_and_unknown_uuid_returns_500(self):
         with tempfile.TemporaryDirectory() as temporary:
             old_root = self.main.PATH_WORK
             self.main.PATH_WORK = Path(temporary)
             try:
                 with self.TestClient(self.main.app) as client:
                     with contextlib.redirect_stdout(io.StringIO()):
-                        response = client.post(
-                            "/parsing",
-                            files={"src_file": ("광고.pdf", b"pdf", "application/pdf")},
-                            data={"option": "not-base64"},
-                        )
-                    self.assertEqual(response.status_code, 500)
+                        with patch.object(self.main, "run_method_in_subprocess", return_value=None):
+                            response = client.post(
+                                "/parsing",
+                                files={"src_file": ("광고.pdf", b"pdf", "application/pdf")},
+                                data={"option": "not-base64"},
+                            )
+                    # 원본 main.py는 option을 읽지 않으므로 잘못된 값이어도 오류가 되지 않는다.
+                    self.assertEqual(response.status_code, 202)
                     response = client.get("/parsing/result/" + "f" * 32)
                     self.assertEqual(response.status_code, 500)
                     self.assertEqual(response.json()["message"], "Requested url does not exist.")
@@ -334,7 +332,7 @@ class ApiContractTests(unittest.TestCase):
                 directory.mkdir()
                 source = directory / "광고.pdf"
                 source.write_bytes(b"pdf")
-                from service.parsing_service import write_parse_status
+                from parsing_service import write_parse_status
 
                 with self.TestClient(self.main.app) as client:
                     write_parse_status(directory, "PARSING")
@@ -342,10 +340,11 @@ class ApiContractTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 200)
                     self.assertEqual(response.json(), {"status": "PARSING"})
 
+                    # 원본 main.py에는 ERROR 전용 분기가 없어 500 + message로 응답한다.
                     write_parse_status(directory, "ERROR", "etl failed")
                     response = client.get(f"/parsing/result/{job_id}")
-                    self.assertEqual(response.status_code, 200)
-                    self.assertEqual(response.json()["status"], "ERROR")
+                    self.assertEqual(response.status_code, 500)
+                    self.assertEqual(response.json()["message"], "etl failed")
 
                     directory.mkdir()
                     (directory / "image").mkdir()
@@ -360,13 +359,41 @@ class ApiContractTests(unittest.TestCase):
                     archive_path = Path(temporary) / "response.zip"
                     archive_path.write_bytes(response.content)
                     with zipfile.ZipFile(archive_path) as archive:
+                        # 원본 main.py는 이미지가 없어도 빈 _img.zip을 함께 넣는다.
                         self.assertEqual(
-                            set(archive.namelist()), {"광고.pdf_hrc.jsonl", "광고.pdf_hrc.json"}
+                            set(archive.namelist()),
+                            {"광고.pdf_hrc.jsonl", "광고.pdf_hrc.json", "광고.pdf_img.zip"},
                         )
                     response = client.get(f"/parsing/result/{job_id}")
                     self.assertEqual(response.status_code, 500)
             finally:
                 self.main.PATH_WORK = old_root
+
+
+class DeliveryBundleTests(unittest.TestCase):
+    """농협 전달본은 flat 구성이며 플랫폼 진입점을 포함하지 않는다."""
+
+    @staticmethod
+    def _builder():
+        sys.path.insert(0, str(ROOT / "tools"))
+        import build_delivery_bundle
+
+        return build_delivery_bundle
+
+    def test_bundle_is_flat_and_excludes_platform_entrypoints(self):
+        builder = self._builder()
+        with tempfile.TemporaryDirectory() as temporary:
+            target = builder.build(Path(temporary) / "bundle")
+            names = {path.name for path in target.iterdir()}
+        self.assertEqual(names, set(builder.REQUIRED_NAMES))
+        self.assertNotIn("main.py", names)
+        self.assertNotIn("gunicorn_config.py", names)
+
+    def test_service_sources_stay_flat(self):
+        for path in SERVICE_DIR.iterdir():
+            if path.name == "__pycache__":
+                continue
+            self.assertTrue(path.is_file(), f"flat 구성 위반: {path}")
 
 
 if __name__ == "__main__":
