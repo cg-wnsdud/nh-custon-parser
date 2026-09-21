@@ -25,6 +25,7 @@ from etl_client import EtlApiError, EtlClient, RequestsTransport  # noqa: E402
 from hrc_exporter import export_hrc  # noqa: E402
 from parsing_service import process_document  # noqa: E402
 from result_contract import build_result_zip, collect_result_files  # noqa: E402
+from vlm_client import VlmConfig, document_excerpt, probe, user_content  # noqa: E402
 
 
 FIXTURE = ROOT / "tests" / "fixtures" / "default_result.json"
@@ -393,6 +394,119 @@ class ApiContractTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 500)
             finally:
                 self.main.PATH_WORK = old_root
+
+
+class FakeVlmResponse:
+    def __init__(self, status_code=200, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+
+class FakeVlmSession:
+    """requests.post 만 흉내 내는 최소 세션."""
+
+    def __init__(self, response=None, error=None):
+        self.response = response
+        self.error = error
+        self.calls = []
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+
+def sample_document():
+    return convert_default_json(fixture_payload())
+
+
+class VlmConfigTests(unittest.TestCase):
+    def test_absent_settings_skip_the_step(self):
+        self.assertIsNone(VlmConfig.from_environment({}))
+
+    def test_partial_settings_are_rejected(self):
+        with self.assertRaises(ValueError):
+            VlmConfig.from_environment({"VLM_BASE_URL": "http://vlm/v1"})
+
+    def test_values_are_parsed(self):
+        config = VlmConfig.from_environment(
+            {
+                "VLM_BASE_URL": "http://vlm.local/v1/",
+                "VLM_MODEL": "gemma-3-27b-it",
+                "VLM_API_KEY": "secret",
+                "VLM_TIMEOUT_SECONDS": "15",
+            }
+        )
+        self.assertEqual(config.base_url, "http://vlm.local/v1")
+        self.assertEqual(config.model, "gemma-3-27b-it")
+        self.assertEqual(config.timeout_seconds, 15.0)
+
+
+class VlmProbeTests(unittest.TestCase):
+    ENV = {"VLM_BASE_URL": "http://vlm.local/v1", "VLM_MODEL": "gemma-3-27b-it"}
+
+    def test_successful_call_writes_a_sidecar_outside_the_result_zip(self):
+        session = FakeVlmSession(
+            FakeVlmResponse(payload={"choices": [{"message": {"content": "대출 상품 안내 문서입니다."}}]})
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            source = directory / "광고.pdf"
+            source.write_bytes(b"pdf")
+            with contextlib.redirect_stdout(io.StringIO()):
+                record = probe(sample_document(), directory, source, env=self.ENV, session=session)
+
+            self.assertEqual(record["status"], "ok")
+            self.assertEqual(record["answer"], "대출 상품 안내 문서입니다.")
+            sidecar = directory / "광고.pdf_vlm.json"
+            self.assertTrue(sidecar.is_file())
+
+            # 결과 규격 파일이 아니므로 ZIP 대상에서 제외된다.
+            export_hrc(sample_document(), source, directory)
+            names = {path.name for path in collect_result_files(directory)}
+            self.assertNotIn(sidecar.name, names)
+
+        call = session.calls[0]
+        self.assertEqual(call["url"], "http://vlm.local/v1/chat/completions")
+        self.assertEqual(call["json"]["model"], "gemma-3-27b-it")
+        self.assertNotIn("Authorization", call["headers"])
+
+    def test_failure_is_recorded_without_breaking_parsing(self):
+        session = FakeVlmSession(error=RuntimeError("connection refused"))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            source = directory / "광고.pdf"
+            source.write_bytes(b"pdf")
+            with contextlib.redirect_stdout(io.StringIO()):
+                record = probe(sample_document(), directory, source, env=self.ENV, session=session)
+        self.assertEqual(record["status"], "error")
+        self.assertIn("connection refused", record["error"])
+
+    def test_api_key_and_image_content_are_supported(self):
+        env = dict(self.ENV, VLM_API_KEY="secret")
+        session = FakeVlmSession(FakeVlmResponse(payload={"choices": [{"message": {"content": "요약"}}]}))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            source = directory / "광고.pdf"
+            source.write_bytes(b"pdf")
+            with contextlib.redirect_stdout(io.StringIO()):
+                probe(sample_document(), directory, source, env=env, session=session)
+        self.assertEqual(session.calls[0]["headers"]["Authorization"], "Bearer secret")
+
+        content = user_content("설명", image=b"fake-png-bytes", media_type="image/png")
+        self.assertEqual(content[0]["type"], "text")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+
+    def test_excerpt_is_capped(self):
+        excerpt = document_excerpt(sample_document(), 20)
+        self.assertLessEqual(len(excerpt), 20)
 
 
 class DeliveryBundleTests(unittest.TestCase):

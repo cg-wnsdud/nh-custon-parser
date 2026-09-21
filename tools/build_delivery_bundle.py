@@ -26,6 +26,7 @@ REQUIRED_NAMES = frozenset(
         "etl_config.py",
         "etl_client.py",
         "etl_adapter.py",
+        "vlm_client.py",
         "document_model.py",
         "hrc_exporter.py",
         "result_contract.py",

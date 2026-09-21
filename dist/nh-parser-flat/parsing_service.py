@@ -56,6 +56,7 @@ from etl_adapter import convert_default_json
 from etl_client import EtlClient
 from hrc_exporter import export_hrc
 from result_contract import collect_result_files
+from vlm_client import probe as vlm_probe
 
 ClientFactory = Callable[[EtlConfig], EtlClient]
 
@@ -72,6 +73,9 @@ def process_document(
     config = EtlConfig.from_environment()
     default_json = client_factory(config).analyze(file_path)
     document = convert_default_json(default_json)
+    # HRC 변환 전 후처리 자리. 현재는 VLM 사용 가능 여부만 확인하는 1회 호출이며
+    # 결과를 HRC에 반영하지 않는다. 설정이 없거나 호출이 실패해도 파싱은 계속된다.
+    vlm_probe(document, work_dir, file_path)
     doc_data = options.get("doc_data")
     if doc_data is not None and not isinstance(doc_data, Mapping):
         raise ValueError("option.doc_data must be an object")

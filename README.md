@@ -58,6 +58,7 @@ server/flow/                        # 템플릿 원본 미러 (수정 금지)
       ├─ document_model.py          # 내부 문서 모델
       ├─ hrc_exporter.py            # HRC JSONL/INFO 생성
       ├─ result_contract.py         # 결과 규격 검증
+      ├─ vlm_client.py              # VLM 호출 (현재는 사용 가능 여부 확인용)
       └─ README.md                  # 농협 전달용 한글 안내
 tools/                              # 우리 개발용 도구 (전달 대상 아님)
 docs/                               # 분석·설계 문서
@@ -177,6 +178,22 @@ python -m unittest discover -s tests -v
 
 FastAPI/Starlette가 없는 환경에서는 API 계약 테스트만 skip된다. 테스트는 전달본과 동일하게
 `service/` 폴더를 import 경로에 넣고 flat 모듈로 불러온다.
+
+## VLM 호출
+
+VLM 결과를 HRC 구조에 반영하려면 정규화된 문서를 손에 쥔 시점이어야 하므로,
+호출 지점은 `convert_default_json()` 과 `export_hrc()` 사이다. 현재 단계에서는 그 자리에
+**사용 가능 여부 확인용 1회 호출**만 넣었고 응답을 HRC에 반영하지 않는다.
+
+- `VLM_BASE_URL`, `VLM_MODEL` 이 없으면 호출 자체를 건너뛴다. ETL 값과 달리 필수가 아니다.
+- 호출 실패는 경고만 남기고 파싱을 계속한다. VLM 때문에 파싱이 실패하면 안 된다.
+- 응답은 `{원본파일명}_vlm.json` 으로 남긴다. `result_contract.py` 가 허용 파일만 ZIP에 담으므로
+  결과 ZIP에는 포함되지 않는다.
+- 요청은 OpenAI 호환 `POST {VLM_BASE_URL}/chat/completions` 이며, 이미지 입력을 위한
+  멀티모달 content 생성(`user_content(prompt, image=...)`)까지는 구현해 두었다. 다만 현재
+  ETL 호출이 `res_type: ["default"]` 라 crop 이미지를 받지 않으므로 실제 이미지 경로는 미정이다.
+- 농협 플랫폼 이미지에는 `openai 2.46.0`, `pillow 12.3.0` 이 있으나 ETL 호출과 같은 방식을
+  유지하기 위해 `requests` 로 구현했다.
 
 ## 다음 단계
 
