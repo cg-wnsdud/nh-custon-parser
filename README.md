@@ -61,7 +61,6 @@ server/flow/                        # 템플릿 원본 미러 (수정 금지)
       └─ README.md                  # 농협 전달용 한글 안내
 tools/                              # 우리 개발용 도구 (전달 대상 아님)
 docs/                               # 분석·설계 문서
-dependencies/                       # requests 고정 명세와 Python 3.11 범용 wheel 원본
 dist/nh-parser-flat/                # 농협 전달용 평면 생성본
 ```
 
@@ -79,7 +78,7 @@ dist/nh-parser-flat/                # 농협 전달용 평면 생성본
 
 ```bash
 python tools/build_delivery_bundle.py
-# dist/nh-parser-flat/      : 구현·안내·requirements·wheel 평면 전달본
+# dist/nh-parser-flat/      : 구현 모듈과 안내 문서로 구성한 평면 전달본
 # dist/nh-parser-flat.zip   : 전달용 압축본
 ```
 
@@ -88,7 +87,7 @@ python tools/build_delivery_bundle.py
 - `main.py`, `gunicorn_config.py`가 섞여 들어가면 빌드 실패
 - `service/` 안에 하위 폴더가 생기면 빌드 실패
 - 상대 import(`from .module import ...`)가 남아 있으면 빌드 실패
-- `requirements.txt`와 고정된 하위 의존성 wheel이 빠지거나 추가되면 빌드 실패
+- 전달 파일 목록이 달라지면 빌드 실패
 - 모든 모듈이 컴파일되는지 확인
 
 ## ETL 설정 주입
@@ -123,10 +122,24 @@ Base64로 인코딩한 JSON 문자열이며 문서 메타데이터나 파서별 
 
 ## Python 의존성
 
-ETL HTTP 호출은 `requests==2.34.2`를 사용한다. 농협 폐쇄망 설치를 위해 `requests`와
-하위 의존성(`certifi`, `charset-normalizer`, `idna`, `urllib3`)을 모두 버전 고정하고
-범용 Python wheel로 전달본에 포함한다. 설치 목록의 원본은 `dependencies/requirements.txt`,
-wheel 원본은 `dependencies/wheels/`이며 빌더가 이를 전달 폴더 최상위로 복사한다.
+ETL HTTP 호출은 `requests`를 사용한다. 농협 플랫폼 이미지에 이미 설치되어 있으므로
+전달본에 wheel을 넣지 않는다. 템플릿 `2.Package.txt` 기준 설치 버전은 다음과 같다.
+
+| 패키지 | 이미지 버전 |
+|---|---|
+| requests | 2.34.2 |
+| urllib3 | 2.7.0 |
+| certifi | 2026.7.22 |
+| idna | 3.18 |
+| charset-normalizer | 3.4.9 |
+
+전달본에 wheel을 동봉하면 두 가지 문제가 생겨 넣지 않기로 했다. 템플릿
+`setup-application.sh`는 `flow/whl/python_multipart-...whl` 한 개만 경로와 파일명으로
+직접 설치하므로 `service/`에 둔 wheel은 자동 설치되지 않고, 수동 설치할 경우 이미지보다
+높은 버전이 플랫폼 라이브러리를 덮어쓴다. 등록 이미지의 패키지 구성이 위 표와 다르면
+그때 폐쇄망 설치 방식을 농협과 협의한다.
+
+로컬 테스트에는 `requests`가 필요하다.
 
 ## 템플릿 원본을 고치지 않고 남겨 둔 이슈
 

@@ -1,7 +1,9 @@
-"""Build the flat NH bundle: parse() implementation and offline dependencies.
+"""Build the flat bundle delivered to NH: parse() implementation files only.
 
 The platform entrypoints (main.py, gunicorn_config.py) stay as the supplied
 template provides them, so they are deliberately excluded from the bundle.
+`requests` is already installed in the platform image (2.Package.txt lists
+2.34.2), so no wheel ships with the bundle either.
 """
 
 from __future__ import annotations
@@ -14,13 +16,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE_DIR = ROOT / "server" / "flow" / "app_custom_parser" / "service"
-DEPENDENCY_DIR = ROOT / "dependencies"
-WHEEL_DIR = DEPENDENCY_DIR / "wheels"
 DIST_DIR = ROOT / "dist"
 BUNDLE_NAME = "nh-parser-flat"
 
 EXCLUDED_NAMES = frozenset({"main.py", "gunicorn_config.py", "__init__.py"})
-REQUIRED_SERVICE_NAMES = frozenset(
+REQUIRED_NAMES = frozenset(
     {
         "parsing_service.py",
         "etl_config.py",
@@ -32,17 +32,6 @@ REQUIRED_SERVICE_NAMES = frozenset(
         "README.md",
     }
 )
-REQUIRED_WHEEL_NAMES = frozenset(
-    {
-        "requests-2.34.2-py3-none-any.whl",
-        "certifi-2026.7.22-py3-none-any.whl",
-        "charset_normalizer-3.5.1-py3-none-any.whl",
-        "idna-3.20-py3-none-any.whl",
-        "urllib3-2.8.0-py3-none-any.whl",
-    }
-)
-REQUIRED_NAMES = REQUIRED_SERVICE_NAMES | REQUIRED_WHEEL_NAMES | {"requirements.txt"}
-
 
 def collect_sources() -> list[Path]:
     """Return the flat file set, rejecting anything the bundle must not carry."""
@@ -59,24 +48,11 @@ def collect_sources() -> list[Path]:
         sources.append(path)
 
     names = {path.name for path in sources}
-    if names != REQUIRED_SERVICE_NAMES:
-        missing = sorted(REQUIRED_SERVICE_NAMES - names)
-        extra = sorted(names - REQUIRED_SERVICE_NAMES)
+    if names != REQUIRED_NAMES:
+        missing = sorted(REQUIRED_NAMES - names)
+        extra = sorted(names - REQUIRED_NAMES)
         raise RuntimeError(f"Unexpected bundle contents (missing={missing}, extra={extra})")
     return sources
-
-
-def collect_dependencies() -> list[Path]:
-    requirements = DEPENDENCY_DIR / "requirements.txt"
-    if not requirements.is_file():
-        raise RuntimeError(f"Missing dependency list: {requirements}")
-    wheels = sorted(WHEEL_DIR.glob("*.whl"))
-    names = {path.name for path in wheels}
-    if names != REQUIRED_WHEEL_NAMES:
-        missing = sorted(REQUIRED_WHEEL_NAMES - names)
-        extra = sorted(names - REQUIRED_WHEEL_NAMES)
-        raise RuntimeError(f"Unexpected wheels (missing={missing}, extra={extra})")
-    return [requirements, *wheels]
 
 
 def check_flat_imports(sources: list[Path]) -> None:
@@ -91,7 +67,6 @@ def check_flat_imports(sources: list[Path]) -> None:
 
 def build(dest: Path | None = None) -> Path:
     sources = collect_sources()
-    dependencies = collect_dependencies()
     check_flat_imports(sources)
 
     target = Path(dest) if dest is not None else DIST_DIR / BUNDLE_NAME
@@ -103,8 +78,6 @@ def build(dest: Path | None = None) -> Path:
         shutil.copy2(path, target / path.name)
         if path.suffix == ".py":
             py_compile.compile(str(target / path.name), doraise=True, cfile=str(target / "__check__"))
-    for path in dependencies:
-        shutil.copy2(path, target / path.name)
     (target / "__check__").unlink(missing_ok=True)
     return target
 
