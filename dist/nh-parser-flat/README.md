@@ -10,7 +10,7 @@
 - `README.md`: 배치 및 설정 안내
 
 etlwithllm api 호출시 필수인 환경변수 `ETL_BASE_URL`, `ETL_AUTHOR`, `ETL_WS_ID`를 설정해야 합니다.
-`run-application.sh`의 `# CUSTOM 영역` 주석 아래에 다음 세 줄을 추가하시면 됩니다.
+`run-application.sh`의 `# CUSTOM 영역` 주석 아래에 다음 세 줄을 추가하는 방법으로 구현했습니다.
 
 ```bash
 # ===================================================
@@ -26,11 +26,10 @@ if [ -z "$FLOW_APP_DIR" ]; then          # ← 기존 내용 (수정 없음)
 
 배포 환경에서 컨테이너·Pod 환경변수로 설정하셔도 동일하게 동작합니다. 파싱은 별도 프로세스에서 실행되지만 기동 프로세스의 환경변수를 그대로 물려받습니다.
 
-선택적으로 `ETL_PRJ_CONFIG`와 `ETL_ANALYSIS_TIMEOUT_SECONDS`를 설정할 수 있으며, 분석 기본값은 `dla`·`html`, 대기시간은 540초입니다.
 필수값이 없으면 ETL을 호출하지 않고 `Missing ETL configuration: ...` 오류를 기록합니다.
-HTTP 호출은 `requests`를 사용하며, 플랫폼 이미지에 포함된 버전(2.34.2)을 그대로 사용하므로 추가 설치가 필요 없습니다.
+HTTP 호출은 `requests`를 사용하며, 플랫폼 이미지에 포함된 버전(2.34.2)을 확인해 구현하였습니다.
 
-## VLM 호출 (선택)
+## VLM 호출 (테스트)
 
 HRC 생성 직전에 VLM을 한 번 호출해 농협 환경에서 사용 가능한지 확인합니다.
 **아래 값을 설정하지 않으면 호출하지 않고 그대로 넘어가며, 호출이 실패해도 파싱은 정상 완료됩니다.**
@@ -46,7 +45,7 @@ HRC 생성 직전에 VLM을 한 번 호출해 농협 환경에서 사용 가능�
 ```bash
 export VLM_BASE_URL="http://{VLM 서버}:{포트}/v1"
 export VLM_MODEL="{모델명}"
-export VLM_API_KEY="{API 키}"          # 필요한 경우에만
+export VLM_API_KEY="{API 키}"          # 필요한 경우
 ```
 
 호출 방식은 `POST {VLM_BASE_URL}/chat/completions` 이며 요청 본문은 OpenAI 호환 형식입니다.
