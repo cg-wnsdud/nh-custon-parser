@@ -21,14 +21,14 @@ Knowledge Lake
   -> KL 적재 및 후속 VectorDB 처리
 ```
 
-## 전달 범위 (2026-09-20 농협 담당자 통화로 확정)
+## 전달 범위
 
-- **우리가 전달하는 것은 `parsing_service.py`의 `parse()` 구현과 그 보조 모듈뿐이다.**
+- **우리가 전달하는 것은 `parsing_service.py`의 `parse()` 구현과 그 보조 모듈들이다.**
 - **`main.py`와 `gunicorn_config.py`는 템플릿 원본 그대로 두고 전달본에도 넣지 않는다.**
   템플릿이 이 파일들을 함께 준 것은 동작 방식을 설명하기 위한 것이지 수정 대상이 아니다.
 - 기능별 파일 분리는 허용되며, **하위 폴더 없는 flat 구성**으로 전달한다.
 - ETL 접속값(`author`, `ws_id` 등)은 우리가 자리만 정의하고 **농협이 실행 시 주입**한다.
-- 주입 방법과 구현 내용을 **한글 안내 문서로 함께 전달**한다
+- 주입 방법과 구현 내용을 **문서로 함께 전달**한다
   (`server/flow/app_custom_parser/service/README.md`).
 
 이전에 보낸 `kl-flat.zip`은 `main.py`와 `gunicorn_config.py`까지 포함한 평면 번들이었고,
@@ -65,31 +65,13 @@ docs/                               # 분석·설계 문서
 dist/nh-parser-flat/                # 농협 전달용 평면 생성본
 ```
 
-`server/flow`의 템플릿 파일은 원본과 diff가 없어야 한다. 원본 경로는
-`C:\Users\cccjj\cginside\농협프로젝트\1.awx_custom_parser_example_api\server\flow` 이다.
+`server/flow`의 템플릿 파일은 원본과 diff가 없어야 한다.
 
 ## README 구분
 
 - 저장소 루트의 이 `README.md`는 개발·검증·설계 근거와 알려진 제약을 보존하는 내부 기준 문서다.
 - `server/flow/app_custom_parser/service/README.md`는 농협 전달용으로, 파일별 역할과 배치 위치,
   필수 환경변수만 간단히 안내한다.
-- `dist/nh-parser-flat/README.md`는 빌드 시 농협 전달용 README를 그대로 복사한 생성 파일이다.
-
-## 전달 번들 만들기
-
-```bash
-python tools/build_delivery_bundle.py
-# dist/nh-parser-flat/      : 구현 모듈과 안내 문서로 구성한 평면 전달본
-# dist/nh-parser-flat.zip   : 전달용 압축본
-```
-
-빌더는 다음을 강제한다.
-
-- `main.py`, `gunicorn_config.py`가 섞여 들어가면 빌드 실패
-- `service/` 안에 하위 폴더가 생기면 빌드 실패
-- 상대 import(`from .module import ...`)가 남아 있으면 빌드 실패
-- 전달 파일 목록이 달라지면 빌드 실패
-- 모든 모듈이 컴파일되는지 확인
 
 ## ETL 설정 주입
 
@@ -115,16 +97,40 @@ python tools/build_delivery_bundle.py
 
 ### `option`이란
 
-`option`은 KL이 `POST /parsing`에서 원본 파일과 함께 보낼 수 있는 선택 설정값이다. 예제상
-Base64로 인코딩한 JSON 문자열이며 문서 메타데이터나 파서별 옵션을 담을 수 있다. 그러나
-현재 템플릿 `main.py`는 이를 디코딩하지 않고 `options = {}`를 전달하므로 우리 코드에서는
-사용하지 않는다. 향후 농협이 템플릿 수정 또는 `option` 전달을 허용하면 그때 입력 스키마를
-확정해 다시 구현한다.
+KL이 `POST /parsing`에 `src_file`과 함께 보내는 Base64 인코딩 JSON 문자열이다. 템플릿
+`readme.md`는 그 안에 **`parser_info`와 `doc_data` 두 덩어리**가 들어온다고 정의한다.
+
+**`parser_info`** 는 KL에 등록된 파서 자체의 정보다. `id`, `parser_type`, `exe_type`,
+`is_ocr`, `extensions` 등과 함께 `prop`에 OCR/LLM 제공자 정보(`supplier`, `url`, `key`)가
+온다. 즉 외부 공급자의 주소와 키는 원래 이 경로로 받는 설계다.
+
+**`doc_data`** 는 KL이 보관 중인 문서 메타데이터이며 **읽기 전용 입력**이다.
+`doc_id`, `title`, `category1~4`, `lang_cd`, `origin_doc_id`, `origin_url`, `origin_doc_auth`,
+`origin_sys_nm`, `doc_reg_date`, `reg_user_id`, `reg_user_nm`, `category_path`, 그리고 문서
+Store에서 정의한 `user_meta.*` 가 들어온다.
+
+파서가 이 값을 바꾸려면 작업 디렉터리에 **`doc_data.json`** 이라는 이름으로 내보내야 하며,
+변경분은 VectorDB에만 반영된다(템플릿 `readme.md`). 문서 단위 메타인 `doc_data`와, HRC
+JSONL의 각 item에 붙이는 `cust_meta`(`cust_attr1~10`, `cust_sattr1~5`)는 서로 다른 것이다.
+
+#### 현재 코드에서의 취급
+
+- `process_document()`가 `option["doc_data"]`를 읽어 `export_hrc()`로 넘긴다. INFO JSON의
+  `title`, `subject`, `updated`가 이 값에서 나오며, 값이 없으면 `title`은 첫 heading으로 대체된다.
+- `result_contract.py`는 작업 디렉터리에 `doc_data.json`이 있으면 결과 ZIP에 포함한다.
+  다만 현재 파서는 이 파일을 만들지 않는다. 광고 후처리에서 파서가 계산한 값을 넣을지
+  규칙이 정해지면 그때 생성한다.
+- **실제로는 항상 비어 있다.** 템플릿 원본 `main.py`가 `options = {}`를 고정으로 넘기고,
+  시그니처도 `option: str = None`이라 KL이 form-data로 보낸 값이 쿼리 파라미터로 해석돼
+  버려지기 때문이다.
+
+즉 수용 경로는 이미 있고, `main.py`가 `option: str = Form(None)`과 base64 디코딩을 하도록
+허용되는 순간 추가 구현 없이 동작한다.
 
 ## Python 의존성
 
 ETL HTTP 호출은 `requests`를 사용한다. 농협 플랫폼 이미지에 이미 설치되어 있으므로
-전달본에 wheel을 넣지 않는다. 템플릿 `2.Package.txt` 기준 설치 버전은 다음과 같다.
+현재 전달본에 wheel을 넣지 않았다. 템플릿 `2.Package.txt` 기준 설치 버전은 다음과 같다.
 
 | 패키지 | 이미지 버전 |
 |---|---|
@@ -133,14 +139,6 @@ ETL HTTP 호출은 `requests`를 사용한다. 농협 플랫폼 이미지에 이
 | certifi | 2026.7.22 |
 | idna | 3.18 |
 | charset-normalizer | 3.4.9 |
-
-전달본에 wheel을 동봉하면 두 가지 문제가 생겨 넣지 않기로 했다. 템플릿
-`setup-application.sh`는 `flow/whl/python_multipart-...whl` 한 개만 경로와 파일명으로
-직접 설치하므로 `service/`에 둔 wheel은 자동 설치되지 않고, 수동 설치할 경우 이미지보다
-높은 버전이 플랫폼 라이브러리를 덮어쓴다. 등록 이미지의 패키지 구성이 위 표와 다르면
-그때 폐쇄망 설치 방식을 농협과 협의한다.
-
-로컬 테스트에는 `requests`가 필요하다.
 
 ## 템플릿 원본을 고치지 않고 남겨 둔 이슈
 
